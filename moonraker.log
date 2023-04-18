@@ -1,0 +1,150 @@
+--------------------Moonraker Log Start--------------------
+data_path: /home/stefano/printer_data
+is_default_data_path: False
+config_file: /home/stefano/printer_data/config/moonraker.conf
+startup_warnings: []
+verbose: False
+debug: False
+asyncio_debug: False
+is_backup_config: False
+is_python_package: False
+log_file: /home/stefano/printer_data/logs/moonraker.log
+software_version: v0.8.0-35-geff0901
+python_version: 3.9.2 (default, Feb 28 2021, 17:03:44)  [GCC 10.2.1 20210110]
+
+#################### Moonraker Configuration ####################
+
+[server]
+host = 0.0.0.0
+port = 7125
+klippy_uds_address = /home/stefano/printer_data/comms/klippy.sock
+
+[authorization]
+trusted_clients = 
+	10.0.0.0/8
+	127.0.0.0/8
+	169.254.0.0/16
+	172.16.0.0/12
+	192.168.0.0/16
+	FE80::/10
+	::1/128
+cors_domains = 
+	*.lan
+	*.local
+	*://localhost
+	*://localhost:*
+	*://my.mainsail.xyz
+	*://app.fluidd.xyz
+
+[octoprint_compat]
+
+[history]
+
+[update_manager]
+channel = dev
+refresh_interval = 168
+
+[update_manager mainsail-config]
+type = git_repo
+primary_branch = master
+path = ~/mainsail-config
+origin = https://github.com/mainsail-crew/mainsail-config.git
+managed_services = klipper
+
+[update_manager mainsail]
+type = web
+channel = stable
+repo = mainsail-crew/mainsail
+path = ~/mainsail
+
+#################################################################
+All Configuration Files:
+/home/stefano/printer_data/config/moonraker.conf
+#################################################################
+Unsafe Shutdown Count: 0
+
+System Info:
+
+***python***
+  version: sys.version_info(major=3, minor=9, micro=2, releaselevel='final', serial=0)
+  version_string: 3.9.2 (default, Feb 28 2021, 17:03:44)  [GCC 10.2.1 20210110]
+
+***cpu_info***
+  cpu_count: 4
+  bits: 32bit
+  processor: i686
+  cpu_desc: Intel(R) Atom(TM) CPU  Z3735F @ 1.33GHz
+  serial_number: 
+  hardware_desc: 
+  model: 
+  total_memory: 1955788
+  memory_units: kB
+
+***sd_info***
+
+***distribution***
+  name: PeppermintOS
+  id: peppermint
+  version: 11.5
+  version_parts: {'major': '11', 'minor': '5', 'build_number': ''}
+  like: 
+  codename: bullseye
+  release_info: {}
+
+***virtualization***
+  virt_type: none
+  virt_identifier: none
+
+***network***
+
+***canbus***
+
+***Allowed Services***
+  klipper_mcu
+  webcamd
+  MoonCord
+  KlipperScreen
+  moonraker-telegram-bot
+  moonraker-obico
+  sonar
+  crowsnest
+  octoeverywhere
+  ratos-configurator
+
+Systemd unit moonraker.service:
+unit_name: moonraker.service
+is_default: True
+manager: systemd
+Properties:
+**Requires=['system.slice', 'network-online.target', '-.mount', 'sysinit.target']
+**After=['sysinit.target', 'basic.target', 'systemd-journald.socket', 'system.slice', '-.mount', 'network-online.target']
+**SupplementaryGroups=['moonraker-admin']
+**EnvironmentFiles=/home/stefano/printer_data/systemd/moonraker.env
+**ExecStart=/home/stefano/moonraker-env/bin/python $MOONRAKER_ARGS
+**WorkingDirectory=/home/stefano/moonraker
+**FragmentPath=/etc/systemd/system/moonraker.service
+**Description=API Server for Klipper SV1
+**User=stefano
+
+Systemd unit klipper.service:
+unit_name: klipper.service
+is_default: True
+manager: systemd
+Properties:
+**Requires=['system.slice', '-.mount', 'sysinit.target']
+**After=['systemd-journald.socket', 'network-online.target', 'system.slice', '-.mount', 'sysinit.target', 'basic.target']
+**SupplementaryGroups=[]
+**EnvironmentFiles=/home/stefano/printer_data/systemd/klipper.env
+**ExecStart=/home/stefano/klippy-env/bin/python $KLIPPER_ARGS
+**WorkingDirectory=/home/stefano/klipper
+**FragmentPath=/etc/systemd/system/klipper.service
+**Description=Klipper 3D Printer Firmware SV1
+**User=stefano
+Klipper Version: v0.11.0-175-gcba119db
+2023-04-18 19:12:53,193 [klippy_connection.py:_on_connection_closed()] - Klippy Connection Removed
+2023-04-18 19:12:54,203 [klippy_connection.py:_do_connect()] - Klippy Connection Established
+2023-04-18 19:12:55,851 [klippy_connection.py:_request_initial_subscriptions()] - Webhooks Subscribed
+2023-04-18 19:12:55,856 [klippy_connection.py:_request_initial_subscriptions()] - GCode Output Subscribed
+2023-04-18 19:12:56,102 [job_state.py:_handle_started()] - Job state initialized: standby
+2023-04-18 19:12:56,381 [klippy_connection.py:_check_ready()] - Klippy ready
+2023-04-18 19:12:56,870 [data_store.py:_init_sensors()] - Configuring available sensors: ['heater_bed', 'extruder']

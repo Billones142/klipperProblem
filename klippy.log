@@ -1,0 +1,580 @@
+Starting Klippy...
+Args: ['/home/stefano/klipper/klippy/klippy.py', '/home/stefano/printer_data/config/printer.cfg', '-I', '/home/stefano/printer_data/comms/klippy.serial', '-l', '/home/stefano/printer_data/logs/klippy.log', '-a', '/home/stefano/printer_data/comms/klippy.sock']
+Git version: 'v0.11.0-175-gcba119db'
+CPU: 4 core Intel(R) Atom(TM) CPU  Z3735F @ 1.33GHz
+Python: '3.9.2 (default, Feb 28 2021, 17:03:44) \n[GCC 10.2.1 20210110]'
+Start printer at Tue Apr 18 19:12:54 2023 (1681855974.0 1409.4)
+===== Config file =====
+[gcode_arcs]
+
+[virtual_sdcard]
+path = ~/printer_data/gcodes
+on_error_gcode = CANCEL_PRINT
+
+[pause_resume]
+
+[display_status]
+
+[gcode_macro CANCEL_PRINT]
+description = Cancel the actual running print
+rename_existing = CANCEL_PRINT_BASE
+gcode = 
+	
+	{% set macro_found = True if printer['gcode_macro _CLIENT_VARIABLE'] is defined else False %}
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE'] %}
+	{% set allow_park = False if not macro_found
+	else False if client.park_at_cancel is not defined
+	else True  if client.park_at_cancel|lower == 'true'
+	else False %}
+	{% set retract = 5.0  if not macro_found else client.cancel_retract|default(5.0)|abs %}
+	
+	{% set park_x = ""                                    if not macro_found
+	else ""                                    if client.park_at_cancel_x is not defined
+	else "X=" + client.park_at_cancel_x|string if client.park_at_cancel_x is not none %}
+	{% set park_y = ""                                    if not macro_found
+	else ""                                    if client.park_at_cancel_y is not defined
+	else "Y=" + client.park_at_cancel_y|string if client.park_at_cancel_y is not none %}
+	{% set custom_park = True if (park_x|length > 0 or park_y|length > 0) else False %}
+	
+	{% if (custom_park or not printer.pause_resume.is_paused) and allow_park %} _TOOLHEAD_PARK_PAUSE_CANCEL {park_x} {park_y} {% endif %}
+	_CLIENT_RETRACT LENGTH={retract}
+	TURN_OFF_HEATERS
+	M106 S0
+	
+	SET_PAUSE_NEXT_LAYER ENABLE=0
+	SET_PAUSE_AT_LAYER ENABLE=0 LAYER=0
+	CANCEL_PRINT_BASE
+
+[gcode_macro PAUSE]
+description = Pause the actual running print
+rename_existing = PAUSE_BASE
+gcode = 
+	PAUSE_BASE
+	_TOOLHEAD_PARK_PAUSE_CANCEL {rawparams}
+
+[gcode_macro RESUME]
+description = Resume the actual running print
+rename_existing = RESUME_BASE
+gcode = 
+	
+	{% set macro_found = True if printer['gcode_macro _CLIENT_VARIABLE'] is defined else False %}
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE'] %}
+	{% set velocity = printer.configfile.settings.pause_resume.recover_velocity %}
+	{% set sp_move        = velocity if not macro_found else client.speed_move|default(velocity) %}
+	
+	_CLIENT_EXTRUDE
+	RESUME_BASE VELOCITY={params.VELOCITY|default(sp_move)}
+
+[gcode_macro SET_PAUSE_NEXT_LAYER]
+description = Enable a pause if the next layer is reached
+gcode = 
+	{% set pause_next_layer = printer['gcode_macro SET_PRINT_STATS_INFO'].pause_next_layer %}
+	{% set ENABLE = params.ENABLE | default(1) | int != 0 %}
+	{% set MACRO = params.MACRO | default(pause_next_layer.call, True) %}
+	SET_GCODE_VARIABLE MACRO=SET_PRINT_STATS_INFO VARIABLE=pause_next_layer VALUE="{{ 'enable': ENABLE, 'call': MACRO }}"
+
+[gcode_macro SET_PAUSE_AT_LAYER]
+description = Enable/disable a pause if a given layer number is reached
+gcode = 
+	{% set pause_at_layer = printer['gcode_macro SET_PRINT_STATS_INFO'].pause_at_layer %}
+	{% set ENABLE = params.ENABLE | int != 0 if params.ENABLE is defined
+	else params.LAYER is defined %}
+	{% set LAYER = params.LAYER | default(pause_at_layer.layer) | int %}
+	{% set MACRO = params.MACRO | default(pause_at_layer.call, True) %}
+	SET_GCODE_VARIABLE MACRO=SET_PRINT_STATS_INFO VARIABLE=pause_at_layer VALUE="{{ 'enable': ENABLE, 'layer': LAYER, 'call': MACRO }}"
+
+[gcode_macro SET_PRINT_STATS_INFO]
+rename_existing = SET_PRINT_STATS_INFO_BASE
+description = Overwrite, to get pause_next_layer and pause_at_layer feature
+variable_pause_next_layer = { 'enable': False, 'call': "PAUSE" }
+variable_pause_at_layer = { 'enable': False, 'layer': 0, 'call': "PAUSE" }
+gcode = 
+	{% if pause_next_layer.enable %}
+	{action_respond_info("%s, forced by pause_next_layer" % pause_next_layer.call)}
+	{pause_next_layer.call}
+	SET_PAUSE_NEXT_LAYER ENABLE=0
+	{% elif pause_at_layer.enable and params.CURRENT_LAYER is defined and params.CURRENT_LAYER|int == pause_at_layer.layer %}
+	{action_respond_info("%s, forced by pause_at_layer [%d]" % (pause_at_layer.call, pause_at_layer.layer))}
+	{pause_at_layer.call}
+	SET_PAUSE_AT_LAYER ENABLE=0
+	{% endif %}
+	SET_PRINT_STATS_INFO_BASE {rawparams}
+
+[gcode_macro _TOOLHEAD_PARK_PAUSE_CANCEL]
+description = Helper: park toolhead used in PAUSE and CANCEL_PRINT
+gcode = 
+	
+	{% set macro_found = True if printer['gcode_macro _CLIENT_VARIABLE'] is defined else False %}
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE'] %}
+	{% set velocity = printer.configfile.settings.pause_resume.recover_velocity %}
+	{% set use_custom     = False if not macro_found
+	else False if client.use_custom_pos is not defined
+	else True  if client.use_custom_pos|lower == 'true'
+	else False %}
+	{% set custom_park_x  = 0.0 if not macro_found else client.custom_park_x|default(0.0) %}
+	{% set custom_park_y  = 0.0 if not macro_found else client.custom_park_y|default(0.0) %}
+	{% set park_dz        = 2.0 if not macro_found else client.custom_park_dz|default(2.0)|abs %}
+	{% set sp_hop         = 900  if not macro_found else client.speed_hop|default(15) * 60 %}
+	{% set sp_move        = velocity * 60 if not macro_found else client.speed_move|default(velocity) * 60 %}
+	
+	{% set origin    = printer.gcode_move.homing_origin %}
+	{% set act       = printer.gcode_move.gcode_position %}
+	{% set max       = printer.toolhead.axis_maximum %}
+	{% set cone      = printer.toolhead.cone_start_z|default(max.z) %}
+	{% set round_bed = True if printer.configfile.settings.printer.kinematics is in ['delta','polar','rotary_delta','winch']
+	else False %}
+	
+	{% set z_min = params.Z_MIN|default(0)|float %}
+	{% set z_park = [[(act.z + park_dz), z_min]|max, (max.z - origin.z)]|min %}
+	{% set x_park = params.X       if params.X is defined
+	else custom_park_x  if use_custom
+	else 0.0            if round_bed
+	else (max.x - 5.0) %}
+	{% set y_park = params.Y       if params.Y is defined
+	else custom_park_y  if use_custom
+	else (max.y - 5.0)  if round_bed and z_park < cone
+	else 0.0            if round_bed
+	else (max.y - 5.0) %}
+	
+	_CLIENT_RETRACT
+	{% if "xyz" in printer.toolhead.homed_axes %}
+	G90
+	G1 Z{z_park} F{sp_hop}
+	G1 X{x_park} Y{y_park} F{sp_move}
+	{% if not printer.gcode_move.absolute_coordinates %} G91 {% endif %}
+	{% else %}
+	{action_respond_info("Printer not homed")}
+	{% endif %}
+
+[gcode_macro _CLIENT_EXTRUDE]
+description = Extrudes, if the extruder is hot enough
+gcode = 
+	{% set macro_found = True if printer['gcode_macro _CLIENT_VARIABLE'] is defined else False %}
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE'] %}
+	{% set use_fw_retract = False if not macro_found
+	else False if client.use_fw_retract is not defined
+	else True  if client.use_fw_retract|lower == 'true' and printer.firmware_retraction is defined
+	else False %}
+	
+	{% set length = (params.LENGTH|float) if params.LENGTH is defined
+	else 1.0 if not macro_found
+	else client.unretract|default(1.0) %}
+	
+	{% set speed = params.SPEED if params.SPEED is defined
+	else 35 if not macro_found
+	else client.speed_unretract|default(35) %}
+	
+	{% set absolute_extrude = printer.gcode_move.absolute_extrude %}
+	
+	{% if printer.extruder.can_extrude %}
+	{% if use_fw_retract %}
+	{% if length < 0 %}
+	G10
+	{% else %}
+	G11
+	{% endif %}
+	{% else %}
+	M83
+	G1 E{length} F{(speed|float|abs) * 60}
+	{% if absolute_extrude %}
+	M82
+	{% endif %}
+	{% endif %}
+	{% else %}
+	{action_respond_info("Extruder not hot enough")}
+	{% endif %}
+
+[gcode_macro _CLIENT_RETRACT]
+description = Retracts, if the extruder is hot enough
+gcode = 
+	{% set macro_found = True if printer['gcode_macro _CLIENT_VARIABLE'] is defined else False %}
+	{% set client = printer['gcode_macro _CLIENT_VARIABLE'] %}
+	
+	{% set length = (params.LENGTH|float) if params.LENGTH is defined
+	else 1.0 if not macro_found
+	else client.retract|default(1.0) %}
+	
+	{% set speed = params.SPEED if params.SPEED is defined
+	else 35 if not macro_found
+	else client.speed_retract|default(35) %}
+	
+	_CLIENT_EXTRUDE LENGTH=-{length|float|abs} SPEED={speed|float|abs}
+
+[mcu]
+serial = /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+
+[printer]
+kinematics = cartesian
+max_velocity = 200
+max_accel = 3000
+max_z_velocity = 50
+max_z_accel = 100
+square_corner_velocity = 5
+
+[gcode_macro M600]
+gcode = 
+	{% set X = params.X|default(50)|float %}
+	{% set Y = params.Y|default(0)|float %}
+	{% set Z = params.Z|default(10)|float %}
+	SAVE_GCODE_STATE NAME=M600_state
+	PAUSE
+	G91
+	G1 E-.8 F2700
+	G1 Z{Z}
+	G90
+	G1 X{X} Y{Y} F3000
+	G91
+	G1 E-50 F1000
+	RESTORE_GCODE_STATE NAME=M600_state
+
+[stepper_x]
+step_pin = ar54
+dir_pin = ar55
+enable_pin = !ar38
+microsteps = 16
+rotation_distance = 40
+endstop_pin = ^!ar3
+position_endstop = -6.80
+position_min = -6.8
+position_max = 300
+homing_speed = 60
+
+[stepper_y]
+step_pin = ar60
+dir_pin = ar61
+enable_pin = !ar56
+microsteps = 16
+rotation_distance = 40
+endstop_pin = ^!ar14
+position_endstop = 0
+position_min = -5
+position_max = 310
+homing_speed = 60
+homing_positive_dir = false
+
+[stepper_z]
+step_pin = ar46
+dir_pin = !ar48
+enable_pin = !ar62
+microsteps = 16
+rotation_distance = 8
+endstop_pin = probe:z_virtual_endstop
+position_min = -6
+position_max = 400
+homing_speed = 15
+second_homing_speed = 4
+
+[stepper_z1]
+step_pin = ar36
+dir_pin = !ar34
+enable_pin = !ar30
+microsteps = 16
+rotation_distance = 8
+
+[safe_z_home]
+home_xy_position = 112.26,185.00
+speed = 120
+z_hop = 15
+
+[probe]
+pin = ^!ar18
+deactivate_on_each_sample = True
+x_offset = 37.74
+y_offset = -40.00
+speed = 4
+samples = 1
+sample_retract_dist = 2.0
+lift_speed = 15.0
+samples_result = average
+samples_tolerance_retries = 0
+z_offset = 1.612
+
+[extruder]
+step_pin = ar26
+dir_pin = ar28
+enable_pin = !ar24
+microsteps = 16
+rotation_distance = 7.722007722007722
+nozzle_diameter = 0.400
+filament_diameter = 1.750
+heater_pin = ar10
+sensor_type = EPCOS 100K B57560G104F
+sensor_pin = analog13
+min_extrude_temp = 190
+min_temp = 5
+max_temp = 300
+max_extrude_only_distance = 500
+max_extrude_cross_section = 2.0
+pressure_advance = 0.16
+control = pid
+pid_kp = 21.465
+pid_ki = 0.980
+pid_kd = 117.521
+
+[heater_bed]
+heater_pin = ar8
+sensor_type = EPCOS 100K B57560G104F
+sensor_pin = analog14
+min_temp = 5
+max_temp = 150
+control = pid
+pid_kp = 48.362
+pid_ki = 0.638
+pid_kd = 915.854
+
+[fan]
+pin = ar9
+kick_start_time = 0.500
+
+[heater_fan my_nozzle_fan]
+pin = ar7
+heater = extruder
+heater_temp = 50.0
+fan_speed = 1.0
+
+[bed_screws]
+screw1 = 55,55
+screw1_name = front left
+screw2 = 255,55
+screw2_name = front right
+screw3 = 255,255
+screw3_name = back right
+screw4 = 55,255
+screw4_name = back left
+speed = 100.0
+
+[bed_mesh]
+mesh_min = 31, 0
+mesh_max = 307.74, 270
+fade_start = 1
+fade_end = 10
+mesh_pps = 2,2
+speed = 120
+horizontal_move_z = 5
+probe_count = 11, 11
+algorithm = bicubic
+
+[screws_tilt_adjust]
+screw1 = 22,83
+screw1_name = front left
+screw2 = 222,83
+screw2_name = front right
+screw3 = 22,283
+screw3_name = back left
+screw4 = 222,283
+screw4_name = back right
+speed = 100.0
+screw_thread = CW-M5
+
+[gcode_macro END_PRINT]
+gcode = 
+	
+	M140 S0
+	M104 S0
+	M106 S0
+	
+	G91
+	G1 X-2 Y-2 E-3 F300
+	
+	G1 Z30 F3000
+	G90
+	
+	M84
+
+[filament_switch_sensor my_sensor]
+runout_gcode = PAUSE
+switch_pin = ar2
+
+[board_pins arduino-mega]
+aliases = 
+	ar0=PE0, ar1=PE1, ar2=PE4, ar3=PE5, ar4=PG5,
+	ar5=PE3, ar6=PH3, ar7=PH4, ar8=PH5, ar9=PH6,
+	ar10=PB4, ar11=PB5, ar12=PB6, ar13=PB7, ar14=PJ1,
+	ar15=PJ0, ar16=PH1, ar17=PH0, ar18=PD3, ar19=PD2,
+	ar20=PD1, ar21=PD0, ar22=PA0, ar23=PA1, ar24=PA2,
+	ar25=PA3, ar26=PA4, ar27=PA5, ar28=PA6, ar29=PA7,
+	ar30=PC7, ar31=PC6, ar32=PC5, ar33=PC4, ar34=PC3,
+	ar35=PC2, ar36=PC1, ar37=PC0, ar38=PD7, ar39=PG2,
+	ar40=PG1, ar41=PG0, ar42=PL7, ar43=PL6, ar44=PL5,
+	ar45=PL4, ar46=PL3, ar47=PL2, ar48=PL1, ar49=PL0,
+	ar50=PB3, ar51=PB2, ar52=PB1, ar53=PB0, ar54=PF0,
+	ar55=PF1, ar56=PF2, ar57=PF3, ar58=PF4, ar59=PF5,
+	ar60=PF6, ar61=PF7, ar62=PK0, ar63=PK1, ar64=PK2,
+	ar65=PK3, ar66=PK4, ar67=PK5, ar68=PK6, ar69=PK7,
+	analog0=PF0, analog1=PF1, analog2=PF2, analog3=PF3, analog4=PF4,
+	analog5=PF5, analog6=PF6, analog7=PF7, analog8=PK0, analog9=PK1,
+	analog10=PK2, analog11=PK3, analog12=PK4, analog13=PK5, analog14=PK6,
+	analog15=PK7,
+	
+	ml70=PG4, ml71=PG3, ml72=PJ2, ml73=PJ3, ml74=PJ7,
+	ml75=PJ4, ml76=PJ5, ml77=PJ6, ml78=PE2, ml79=PE6,
+	ml80=PE7, ml81=PD4, ml82=PD5, ml83=PD6, ml84=PH2,
+	ml85=PH7
+
+[bed_mesh default]
+version = 1
+points = 
+	-0.200000, -0.220000, -0.170000, -0.137500, -0.177500, -0.200000, -0.180000, -0.105000, -0.030000, 0.032500, 0.130000
+	-0.220000, -0.275000, -0.257500, -0.152500, -0.187500, -0.187500, -0.147500, -0.152500, -0.087500, -0.002500, 0.197500
+	-0.235000, -0.262500, -0.237500, -0.177500, -0.187500, -0.152500, -0.112500, -0.090000, -0.045000, 0.035000, 0.245000
+	-0.277500, -0.295000, -0.245000, -0.190000, -0.185000, -0.100000, -0.057500, -0.065000, -0.005000, 0.067500, 0.225000
+	-0.232500, -0.217500, -0.182500, -0.135000, -0.117500, -0.055000, -0.037500, -0.072500, 0.002500, 0.085000, 0.227500
+	-0.105000, -0.105000, -0.092500, -0.090000, -0.077500, -0.040000, -0.012500, -0.010000, 0.062500, 0.117500, 0.252500
+	-0.057500, -0.057500, -0.055000, -0.045000, -0.022500, 0.030000, 0.070000, 0.067500, 0.127500, 0.177500, 0.315000
+	-0.002500, -0.007500, -0.015000, -0.010000, 0.005000, 0.060000, 0.107500, 0.070000, 0.117500, 0.172500, 0.317500
+	0.015000, 0.010000, 0.027500, 0.037500, 0.047500, 0.080000, 0.090000, 0.102500, 0.160000, 0.222500, 0.360000
+	-0.002500, 0.010000, 0.035000, 0.067500, 0.087500, 0.120000, 0.157500, 0.180000, 0.255000, 0.332500, 0.475000
+	-0.022500, 0.015000, 0.027500, 0.047500, 0.067500, 0.112500, 0.145000, 0.182500, 0.252500, 0.322500, 0.477500
+x_count = 11
+y_count = 11
+mesh_x_pps = 2
+mesh_y_pps = 2
+algo = bicubic
+tension = 0.2
+min_x = 31.0
+max_x = 307.7
+min_y = 0.0
+max_y = 270.0
+=======================
+Extruder max_extrude_ratio=0.831503
+mcu 'mcu': Starting serial connect
+webhooks client 3058632904: New connection
+webhooks client 3058632904: Client info {'program': 'Moonraker', 'version': 'v0.8.0-35-geff0901'}
+mcu 'mcu': got {'oid': 11, 'next_clock': 2932858112, 'value': 7787, '#name': 'analog_in_state', '#sent_time': 1410.5797374, '#receive_time': 1410.590272962}
+mcu 'mcu': got {'oid': 20, 'next_clock': 2934298112, 'value': 7049, '#name': 'analog_in_state', '#sent_time': 1410.637186717, '#receive_time': 1410.6799860160002}
+mcu 'mcu': got {'oid': 11, 'next_clock': 2937658112, 'value': 7787, '#name': 'analog_in_state', '#sent_time': 1410.8657981840001, '#receive_time': 1410.8905656900001}
+mcu 'mcu': got {'oid': 20, 'next_clock': 2939098112, 'value': 7042, '#name': 'analog_in_state', '#sent_time': 1410.922774545, '#receive_time': 1410.98257384}
+Loaded MCU 'mcu' 105 commands (v0.11.0-175-gcba119db-20230416_123047-wings / gcc: mixed binutils: (GNU Binutils) 2.26.20160125)
+MCU 'mcu' config: ADC_MAX=1023 BUS_PINS_spi=PB3,PB2,PB1 BUS_PINS_twi=PD0,PD1 CLOCK_FREQ=16000000 MCU=atmega2560 PWM_MAX=255 RECEIVE_WINDOW=192 RESERVE_PINS_serial=PE0,PE1 SERIAL_BAUD=250000 STATS_SUMSQ_BASE=256
+Configured MCU 'mcu' (603 moves)
+Starting heater checks for heater_bed
+bed_mesh: generated points
+Index |  Tool Adjusted  |   Probe
+  0   | (-6.7, 40.0)    | (31.0, 0.0)
+  1   | (20.9, 40.0)    | (58.7, 0.0)
+  2   | (48.6, 40.0)    | (86.3, 0.0)
+  3   | (76.3, 40.0)    | (114.0, 0.0)
+  4   | (103.9, 40.0)   | (141.7, 0.0)
+  5   | (131.6, 40.0)   | (169.4, 0.0)
+  6   | (159.3, 40.0)   | (197.0, 0.0)
+  7   | (186.9, 40.0)   | (224.7, 0.0)
+  8   | (214.6, 40.0)   | (252.4, 0.0)
+  9   | (242.3, 40.0)   | (280.0, 0.0)
+  10  | (270.0, 40.0)   | (307.7, 0.0)
+  11  | (270.0, 67.0)   | (307.7, 27.0)
+  12  | (242.3, 67.0)   | (280.0, 27.0)
+  13  | (214.6, 67.0)   | (252.4, 27.0)
+  14  | (187.0, 67.0)   | (224.7, 27.0)
+  15  | (159.3, 67.0)   | (197.0, 27.0)
+  16  | (131.6, 67.0)   | (169.4, 27.0)
+  17  | (103.9, 67.0)   | (141.7, 27.0)
+  18  | (76.3, 67.0)    | (114.0, 27.0)
+  19  | (48.6, 67.0)    | (86.3, 27.0)
+  20  | (20.9, 67.0)    | (58.7, 27.0)
+  21  | (-6.7, 67.0)    | (31.0, 27.0)
+  22  | (-6.7, 94.0)    | (31.0, 54.0)
+  23  | (20.9, 94.0)    | (58.7, 54.0)
+  24  | (48.6, 94.0)    | (86.3, 54.0)
+  25  | (76.3, 94.0)    | (114.0, 54.0)
+  26  | (103.9, 94.0)   | (141.7, 54.0)
+  27  | (131.6, 94.0)   | (169.4, 54.0)
+  28  | (159.3, 94.0)   | (197.0, 54.0)
+  29  | (186.9, 94.0)   | (224.7, 54.0)
+  30  | (214.6, 94.0)   | (252.4, 54.0)
+  31  | (242.3, 94.0)   | (280.0, 54.0)
+  32  | (270.0, 94.0)   | (307.7, 54.0)
+  33  | (270.0, 121.0)  | (307.7, 81.0)
+  34  | (242.3, 121.0)  | (280.0, 81.0)
+  35  | (214.6, 121.0)  | (252.4, 81.0)
+  36  | (187.0, 121.0)  | (224.7, 81.0)
+  37  | (159.3, 121.0)  | (197.0, 81.0)
+  38  | (131.6, 121.0)  | (169.4, 81.0)
+  39  | (103.9, 121.0)  | (141.7, 81.0)
+  40  | (76.3, 121.0)   | (114.0, 81.0)
+  41  | (48.6, 121.0)   | (86.3, 81.0)
+  42  | (20.9, 121.0)   | (58.7, 81.0)
+  43  | (-6.7, 121.0)   | (31.0, 81.0)
+  44  | (-6.7, 148.0)   | (31.0, 108.0)
+  45  | (20.9, 148.0)   | (58.7, 108.0)
+  46  | (48.6, 148.0)   | (86.3, 108.0)
+  47  | (76.3, 148.0)   | (114.0, 108.0)
+  48  | (103.9, 148.0)  | (141.7, 108.0)
+  49  | (131.6, 148.0)  | (169.4, 108.0)
+  50  | (159.3, 148.0)  | (197.0, 108.0)
+  51  | (186.9, 148.0)  | (224.7, 108.0)
+  52  | (214.6, 148.0)  | (252.4, 108.0)
+  53  | (242.3, 148.0)  | (280.0, 108.0)
+  54  | (270.0, 148.0)  | (307.7, 108.0)
+  55  | (270.0, 175.0)  | (307.7, 135.0)
+  56  | (242.3, 175.0)  | (280.0, 135.0)
+  57  | (214.6, 175.0)  | (252.4, 135.0)
+  58  | (187.0, 175.0)  | (224.7, 135.0)
+  59  | (159.3, 175.0)  | (197.0, 135.0)
+  60  | (131.6, 175.0)  | (169.4, 135.0)
+  61  | (103.9, 175.0)  | (141.7, 135.0)
+  62  | (76.3, 175.0)   | (114.0, 135.0)
+  63  | (48.6, 175.0)   | (86.3, 135.0)
+  64  | (20.9, 175.0)   | (58.7, 135.0)
+  65  | (-6.7, 175.0)   | (31.0, 135.0)
+  66  | (-6.7, 202.0)   | (31.0, 162.0)
+  67  | (20.9, 202.0)   | (58.7, 162.0)
+  68  | (48.6, 202.0)   | (86.3, 162.0)
+  69  | (76.3, 202.0)   | (114.0, 162.0)
+  70  | (103.9, 202.0)  | (141.7, 162.0)
+  71  | (131.6, 202.0)  | (169.4, 162.0)
+  72  | (159.3, 202.0)  | (197.0, 162.0)
+  73  | (186.9, 202.0)  | (224.7, 162.0)
+  74  | (214.6, 202.0)  | (252.4, 162.0)
+  75  | (242.3, 202.0)  | (280.0, 162.0)
+  76  | (270.0, 202.0)  | (307.7, 162.0)
+  77  | (270.0, 229.0)  | (307.7, 189.0)
+  78  | (242.3, 229.0)  | (280.0, 189.0)
+  79  | (214.6, 229.0)  | (252.4, 189.0)
+  80  | (187.0, 229.0)  | (224.7, 189.0)
+  81  | (159.3, 229.0)  | (197.0, 189.0)
+  82  | (131.6, 229.0)  | (169.4, 189.0)
+  83  | (103.9, 229.0)  | (141.7, 189.0)
+  84  | (76.3, 229.0)   | (114.0, 189.0)
+  85  | (48.6, 229.0)   | (86.3, 189.0)
+  86  | (20.9, 229.0)   | (58.7, 189.0)
+  87  | (-6.7, 229.0)   | (31.0, 189.0)
+  88  | (-6.7, 256.0)   | (31.0, 216.0)
+  89  | (20.9, 256.0)   | (58.7, 216.0)
+  90  | (48.6, 256.0)   | (86.3, 216.0)
+  91  | (76.3, 256.0)   | (114.0, 216.0)
+  92  | (103.9, 256.0)  | (141.7, 216.0)
+  93  | (131.6, 256.0)  | (169.4, 216.0)
+  94  | (159.3, 256.0)  | (197.0, 216.0)
+  95  | (186.9, 256.0)  | (224.7, 216.0)
+  96  | (214.6, 256.0)  | (252.4, 216.0)
+  97  | (242.3, 256.0)  | (280.0, 216.0)
+  98  | (270.0, 256.0)  | (307.7, 216.0)
+  99  | (270.0, 283.0)  | (307.7, 243.0)
+  100 | (242.3, 283.0)  | (280.0, 243.0)
+  101 | (214.6, 283.0)  | (252.4, 243.0)
+  102 | (187.0, 283.0)  | (224.7, 243.0)
+  103 | (159.3, 283.0)  | (197.0, 243.0)
+  104 | (131.6, 283.0)  | (169.4, 243.0)
+  105 | (103.9, 283.0)  | (141.7, 243.0)
+  106 | (76.3, 283.0)   | (114.0, 243.0)
+  107 | (48.6, 283.0)   | (86.3, 243.0)
+  108 | (20.9, 283.0)   | (58.7, 243.0)
+  109 | (-6.7, 283.0)   | (31.0, 243.0)
+  110 | (-6.7, 310.0)   | (31.0, 270.0)
+  111 | (20.9, 310.0)   | (58.7, 270.0)
+  112 | (48.6, 310.0)   | (86.3, 270.0)
+  113 | (76.3, 310.0)   | (114.0, 270.0)
+  114 | (103.9, 310.0)  | (141.7, 270.0)
+  115 | (131.6, 310.0)  | (169.4, 270.0)
+  116 | (159.3, 310.0)  | (197.0, 270.0)
+  117 | (186.9, 310.0)  | (224.7, 270.0)
+  118 | (214.6, 310.0)  | (252.4, 270.0)
+  119 | (242.3, 310.0)  | (280.0, 270.0)
+  120 | (270.0, 310.0)  | (307.7, 270.0)
+Starting heater checks for extruder
+webhooks: registering remote method 'shutdown_machine' for connection id: 3058632904
+webhooks: registering remote method 'reboot_machine' for connection id: 3058632904
+webhooks: registering remote method 'pause_job_queue' for connection id: 3058632904
+webhooks: registering remote method 'start_job_queue' for connection id: 3058632904
+Stats 1413.1: gcodein=0  mcu: mcu_awake=0.027 mcu_task_avg=0.000127 mcu_task_stddev=0.000087 bytes_write=986 bytes_read=4230 bytes_retransmit=16 bytes_invalid=0 send_seq=122 receive_seq=122 retransmit_seq=89 srtt=0.004 rttvar=0.000 rto=0.025 ready_bytes=0 upcoming_bytes=0 freq=16000442  heater_bed: target=0 temp=25.9 pwm=0.000 sysload=0.06 cputime=1.558 memavail=1405072 print_time=0.001 buffer_time=0.000 print_stall=0 extruder: target=0 temp=55.2 pwm=0.000
+Stats 1414.1: gcodein=0  mcu: mcu_awake=0.027 mcu_task_avg=0.000127 mcu_task_stddev=0.000087 bytes_write=1007 bytes_read=4340 bytes_retransmit=23 bytes_invalid=0 send_seq=124 receive_seq=124 retransmit_seq=124 srtt=0.003 rttvar=0.000 rto=0.050 ready_bytes=0 upcoming_bytes=0 freq=16000442  heater_bed: target=0 temp=26.8 pwm=0.000 sysload=0.06 cputime=1.581 memavail=1405072 print_time=0.001 buffer_time=0.000 print_stall=0 extruder: target=0 temp=54.5 pwm=0.000
